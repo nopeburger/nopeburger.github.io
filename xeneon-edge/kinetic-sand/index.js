@@ -8,7 +8,7 @@ const coinFlip = () => Math.random() > 0.5;
 
 /**
  * 1. Harmonic Lissajous Labyrinth
- * Reduced revs for 3-minute completion.
+ * High frequency multipliers (f1 ~10) mean we need very few base revolutions.
  */
 const createLissajousLabyrinth = () => {
   const f1 = randomInt(7, 13); 
@@ -20,8 +20,8 @@ const createLissajousLabyrinth = () => {
   
   const drift = randomFloat(0.5, 2.0);
   
-  // Reduced from 30-50 to 10-20
-  const revs = randomInt(10, 20); 
+  // DRAPSTICALLY REDUCED: 1-2 revs is enough because f1/f2 create the density
+  const revs = randomFloat(1.0, 2.5); 
 
   return (t) => {
     const angle = t * Math.PI * 2 * revs;
@@ -40,8 +40,8 @@ const createRationalRoseWeb = () => {
   const d = randomInt(2, 7); 
   
   const precession = randomFloat(0.1, 0.4) * (coinFlip() ? 1 : -1);
-  // Reduced from 50-80 to 12-24
-  const revs = randomInt(12, 24);
+  // Reduced to 6-12
+  const revs = randomInt(6, 12);
   
   return (t) => {
      const theta = t * Math.PI * 2 * revs;
@@ -61,8 +61,8 @@ const createSpirograph = () => {
   const R = randomFloat(0.5, 0.8) + 0.00123; 
   const r = randomFloat(0.12, 0.45) + 0.00456; 
   const d = randomFloat(0.2, 0.9); 
-  // Reduced from 50-90 to 15-25
-  const revs = randomInt(15, 25);
+  // Reduced to 5-10
+  const revs = randomInt(5, 10);
   
   const globalRot = randomFloat(0.2, 1.0);
 
@@ -96,8 +96,8 @@ const createRotoSpiro = () => {
   const d = randomFloat(0.3, 0.8);
   const frameSpeed = randomFloat(1, 4) * (coinFlip() ? 1 : -1);
   const drift = randomFloat(0.1, 0.5);
-  // Reduced from 50-90 to 15-25
-  const revs = randomInt(15, 25);
+  // Reduced to 4-8
+  const revs = randomInt(4, 8);
   
   return (t) => {
     const theta = t * Math.PI * 2 * revs;
@@ -130,8 +130,8 @@ const createHarmonograph = () => {
   const p3 = Math.PI / 2; 
   const p2 = 0;
   const p4 = (Math.floor(Math.random() * 4) * Math.PI / 2); 
-  // Reduced from 40-70 to 15-30
-  const revs = randomInt(15, 30);
+  // Reduced to 4-10
+  const revs = randomInt(4, 10);
 
   return (t) => {
       const time = t * Math.PI * 2 * revs;
@@ -147,8 +147,8 @@ const createHarmonograph = () => {
 const createSpiralGalaxy = () => {
   const arms = randomInt(3, 9);
   const curvature = randomFloat(0.5, 1.5);
-  // Reduced from 40-70 to 15-30
-  const revs = randomInt(15, 30);
+  // Reduced to 4-8 turns
+  const revs = randomInt(4, 8);
   const armPhase = Math.random() * Math.PI;
   const galaxyDrift = randomFloat(0.2, 0.8);
 
@@ -172,8 +172,8 @@ const createSpiralGalaxy = () => {
 const createTorusKnot = () => {
   const pVal = randomInt(2, 7);
   const qVal = pVal + randomInt(1, 3);
-  // Reduced from 70-120 to 20-40
-  const revs = randomInt(20, 40);
+  // Reduced to 3-6
+  const revs = randomInt(3, 6);
   const drift = randomFloat(0.5, 1.5);
   
   return (t) => {
@@ -193,8 +193,8 @@ const createSuperformula = () => {
   const n1 = randomFloat(0.5, 3);
   const n2 = randomFloat(0.5, 3);
   const n3 = randomFloat(0.5, 3);
-  // Reduced from 30-60 to 10-20
-  const revs = randomInt(10, 20);
+  // Reduced to 5-10
+  const revs = randomInt(5, 10);
   const rotationSpeed = randomFloat(0.1, 0.3) * (coinFlip() ? 1 : -1);
 
   return (t) => {
@@ -216,8 +216,8 @@ const createSuperformula = () => {
  * 9. Infinity Cycle
  */
 const createInfinityCycle = () => {
-  // Reduced from 50-90 to 15-30
-  const revs = randomInt(15, 30);
+  // Reduced to 4-8
+  const revs = randomInt(4, 8);
   const rotationSpeed = randomFloat(0.02, 0.1);
   
   return (t) => {
@@ -238,8 +238,8 @@ const createInfinityCycle = () => {
  * 10. Butterfly Curve
  */
 const createButterflyCurve = () => {
-  // Reduced from 40-80 to 15-30
-  const revs = randomInt(15, 30);
+  // Reduced to 4-8
+  const revs = randomInt(4, 8);
   const drift = randomFloat(0.2, 0.6);
   
   return (t) => {
