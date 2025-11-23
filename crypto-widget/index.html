@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro Crypto Tracker</title>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Tailwind CSS (CDN for standalone usage) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              mono: ['"JetBrains Mono"', 'monospace'],
+            },
+            colors: {
+              retro: {
+                bg: '#09090b',       /* Zinc-950 */
+                card: '#18181b',     /* Zinc-900 */
+                border: '#27272a',   /* Zinc-800 */
+                primary: '#e4e4e7',  /* Zinc-200 */
+                secondary: '#a1a1aa',/* Zinc-400 */
+                accent: '#fafafa',   /* Zinc-50 */
+                grid: '#27272a',     /* Zinc-800 */
+              }
+            },
+            animation: {
+              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+        body { background-color: #09090b; color: #e4e4e7; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #18181b; }
+        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+        
+        /* Chart Tooltip Customization */
+        #chartjs-tooltip {
+            opacity: 0;
+            position: absolute;
+            background: #18181b;
+            color: #e4e4e7;
+            border: 1px solid #27272a;
+            border-radius: 4px;
+            pointer-events: none;
+            padding: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            transform: translate(-50%, 0);
+            transition: all .1s ease;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen overflow-hidden font-mono selection:bg-retro-primary selection:text-black">
+
+    <!-- Visual Effects -->
+    <div class="fixed top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-retro-primary to-transparent opacity-30 z-50 animate-pulse"></div>
+    <div class="fixed inset-0 pointer-events-none z-50 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01),rgba(255,255,255,0.03))] bg-[length:100%_2px,3px_100%] opacity-20"></div>
+    <div class="fixed inset-0 pointer-events-none z-0 opacity-5" style="background-image: linear-gradient(#27272a 1px, transparent 1px), linear-gradient(90deg, #27272a 1px, transparent 1px); background-size: 40px 40px;"></div>
+
+    <!-- Main Container -->
+    <main class="w-full h-full relative z-10 flex flex-col p-4">
+        <div class="w-full h-full max-w-[835px] max-h-[690px] mx-auto">
+            <div id="crypto-grid" class="grid grid-cols-2 grid-rows-2 gap-2 md:gap-4 w-full h-full">
+                <!-- Cards will be injected here via JS -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Custom Tooltip Element for Charts -->
+    <div id="chartjs-tooltip"></div>
+
+    <script>
+        /** CONSTANTS & CONFIG **/
+        const DEFAULT_COINS = ['bitcoin', 'ethereum', 'binancecoin', 'solana'];
+        const API_BASE_URL = 'https://api.coingecko.com/api/v3';
+        const MAX_RETRIES = 5; // Increased retries for stability
+        
+        const TIME_RANGES = {
+            'DAY': { label: '24H', interval: '1', id: 'DAY' },
+            'WEEK': { label: '7D', interval: '7', id: 'WEEK' },
+            'MONTH': { label: '1M', interval: '30', id: 'MONTH' },
+            'QUARTER': { label: '3M', interval: '90', id: 'QUARTER' }
+        };
+        const RANGE_ORDER = ['DAY', 'WEEK', 'MONTH', 'QUARTER'];
+
+        /** STATE MANAGEMENT **/
+        const appState = {
+            coins: [],
+            prices: {}, // { coinId: { ...CoinData } }
+            charts: {}, // { coinId: ChartInstance }
+            ranges: {}, // { coinId: 'MONTH' }
+            historyCache: {}, // { key: { data, timestamp } }
+        };
+
+        // Determine coins from URL or Default
+        const params = new URLSearchParams(window.location.search);
+        const coinsParam = params.get('coins');
+        let rawCoins = coinsParam ? coinsParam.split(',').map(c => c.trim().toLowerCase()) : DEFAULT_COINS;
+        
+        // Ensure exactly 4 coins
+        while (rawCoins.length < 4) {
+            rawCoins.push(DEFAULT_COINS[rawCoins.length % DEFAULT_COINS.length]);
+        }
+        appState.coins = rawCoins.slice(0, 4);
+        
+        // Initialize Default Ranges
+        appState.coins.forEach(c => appState.ranges[c] = 'MONTH');
+
+        /** API SERVICE LAYER (Ported from React) **/
+        const requestQueue = [];
+        let isProcessingQueue = false;
+        const responseCache = new Map();
+        const CACHE_DURATION = 10 * 60 * 1000;
+
+        async function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+        async function processQueue() {
+            if (isProcessingQueue) return;
+            isProcessingQueue = true;
+            try {
+                while (requestQueue.length > 0) {
+                    const item = requestQueue.shift();
+                    if (item) {
+                        try { await item.task(); } catch (e) { console.error(e); }
+                        await delay(2000); // 2s delay for rate limits
+                    }
+                }
+            } finally {
+                isProcessingQueue = false;
+            }
+        }
+
+        function queuedFetch(fetchFn, priority = false) {
+            return new Promise((resolve, reject) => {
+                const task = async () => {
+                    try { resolve(await fetchFn()); } catch (e) { reject(e); }
+                };
+                if (priority) requestQueue.unshift({ task });
+                else requestQueue.push({ task });
+                processQueue();
+            });
+        }
+
+        // Updated fetchJson with Retry Logic
+        async function fetchJson(url, retryCount = 0) {
+            try {
+                const response = await fetch(url);
+
+                if (response.status === 429) {
+                    if (retryCount < MAX_RETRIES) {
+                        const backoff = 2500 * Math.pow(2, retryCount) + (Math.random() * 500);
+                        console.warn(`Rate limit hit for ${url}. Retrying in ${backoff}ms...`);
+                        await delay(backoff);
+                        return fetchJson(url, retryCount + 1);
+                    }
+                    throw new Error(`Rate limit exceeded`);
+                }
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                return response.json();
+            } catch (error) {
+                // Network errors or others -> retry a few times
+                if (retryCount < MAX_RETRIES) {
+                    const backoff = 3000 * (retryCount + 1);
+                    console.warn(`Fetch failed (attempt ${retryCount+1}/${MAX_RETRIES}): ${error.message}`);
+                    await delay(backoff);
+                    return fetchJson(url, retryCount + 1);
+                }
+                throw error;
+            }
+        }
+
+        function mapCoinGeckoData(data) {
+            return {
+                id: data.id,
+                name: data.name,
+                priceUsd: String(data.current_price || 0),
+                changePercent24Hr: String(data.price_change_percentage_24h || 0),
+            };
+        }
+
+        function mapCoinGeckoDetail(data) {
+            return {
+                id: data.id,
+                name: data.name,
+                priceUsd: String(data.market_data?.current_price?.usd || 0),
+                changePercent24Hr: String(data.market_data?.price_change_percentage_24h || 0),
+            };
+        }
+
+        async function fetchAssets(ids) {
+            return queuedFetch(async () => {
+                const uniqueIds = Array.from(new Set(ids));
+                const url = `${API_BASE_URL}/coins/markets?vs_currency=usd&ids=${uniqueIds.join(',')}&order=market_cap_desc&per_page=100&page=1&sparkline=false`;
+                try {
+                    const data = await fetchJson(url);
+                    return data.map(mapCoinGeckoData);
+                } catch (e) {
+                    console.warn("Batch fetch failed, attempting individual fallback...");
+                    // Fallback Strategy: Fetch individually using direct calls
+                    const results = [];
+                    for (const id of uniqueIds) {
+                        try {
+                            await delay(1000); 
+                            const detailUrl = `${API_BASE_URL}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
+                            const data = await fetchJson(detailUrl);
+                            results.push(mapCoinGeckoDetail(data));
+                        } catch (err) {
+                            console.error(`Fallback failed for ${id}`, err);
+                        }
+                    }
+                    return results;
+                }
+            }, true); // High Priority
+        }
+
+        async function fetchHistory(id, rangeKey) {
+            const config = TIME_RANGES[rangeKey];
+            const cacheKey = `history-${id}-${rangeKey}`;
+            
+            // Cache Check
+            const cached = responseCache.get(cacheKey);
+            if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+                return cached.data;
+            }
+
+            const url = `${API_BASE_URL}/coins/${id}/market_chart?vs_currency=usd&days=${config.interval}`;
+
+            return queuedFetch(async () => {
+                const json = await fetchJson(url);
+                const result = (json.prices || []).map(([time, price]) => ({ time, price }));
+                responseCache.set(cacheKey, { data: result, timestamp: Date.now() });
+                return result;
+            }, false); // Low Priority
+        }
+
+        /** UI & RENDERING **/
+
+        function initGrid() {
+            const grid = document.getElementById('crypto-grid');
+            grid.innerHTML = '';
+
+            appState.coins.forEach((coinId, index) => {
+                const card = document.createElement('div');
+                card.className = "relative flex flex-col h-full bg-retro-card border border-retro-border rounded-lg overflow-hidden group cursor-pointer hover:border-retro-primary/50 transition-colors duration-300";
+                card.onclick = () => handleCardClick(coinId);
+                card.innerHTML = `
+                    <div class="absolute top-0 left-0 w-2 h-2 border-t border-l border-retro-primary/30"></div>
+                    <div class="absolute top-0 right-0 w-2 h-2 border-t border-r border-retro-primary/30"></div>
+                    <div class="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-retro-primary/30"></div>
+                    <div class="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-retro-primary/30"></div>
+
+                    <div class="p-4 flex justify-between items-start z-10 bg-gradient-to-b from-retro-card to-transparent">
+                        <div>
+                            <h3 id="name-${coinId}-${index}" class="text-xs text-retro-secondary uppercase tracking-widest font-mono mb-1">${coinId}</h3>
+                            <div id="price-${coinId}-${index}" class="text-xl md:text-2xl font-bold font-mono tracking-tight text-white">LOADING...</div>
+                        </div>
+                        <div class="text-right">
+                            <div id="change-${coinId}-${index}" class="text-sm font-mono font-bold text-retro-secondary">--</div>
+                            <div class="text-[10px] text-retro-secondary font-mono mt-1">24h CHANGE</div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 w-full min-h-0 relative" id="chart-container-${coinId}-${index}">
+                        <div id="loader-${coinId}-${index}" class="absolute inset-0 flex items-center justify-center">
+                            <div class="w-6 h-6 border-2 border-retro-primary border-t-transparent rounded-full animate-spin"></div>
+                        </div>
+                        <canvas id="canvas-${coinId}-${index}"></canvas>
+                    </div>
+
+                    <div id="ranges-${coinId}-${index}" class="h-8 flex items-center justify-center gap-2 border-t border-retro-border bg-retro-card/50 backdrop-blur-sm z-10">
+                        <!-- Ranges injected here -->
+                    </div>
+                `;
+                grid.appendChild(card);
+                renderRanges(coinId, index);
+            });
+        }
+
+        function renderRanges(coinId, index) {
+            const container = document.getElementById(`ranges-${coinId}-${index}`);
+            const currentRange = appState.ranges[coinId];
+            
+            container.innerHTML = RANGE_ORDER.map(r => {
+                const isActive = r === currentRange;
+                const classes = isActive 
+                    ? 'bg-retro-border text-retro-primary' 
+                    : 'text-retro-secondary hover:text-retro-primary';
+                return `<span class="text-[10px] font-mono px-2 py-0.5 rounded transition-colors ${classes}">${TIME_RANGES[r].label}</span>`;
+            }).join('');
+        }
+
+        function formatUSD(num) {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(num);
+        }
+
+        function updateCardData(coinId, index, data) {
+            if (!data) return;
+            document.getElementById(`name-${coinId}-${index}`).innerText = data.name;
+            document.getElementById(`price-${coinId}-${index}`).innerText = formatUSD(parseFloat(data.priceUsd));
+            
+            const changeEl = document.getElementById(`change-${coinId}-${index}`);
+            const changeVal = parseFloat(data.changePercent24Hr);
+            changeEl.innerText = `${changeVal.toFixed(2)}%`;
+            changeEl.className = `text-sm font-mono font-bold ${changeVal >= 0 ? 'text-green-400' : 'text-red-400'}`;
+        }
+
+        function renderChart(coinId, index, historyData) {
+            const canvas = document.getElementById(`canvas-${coinId}-${index}`);
+            const loader = document.getElementById(`loader-${coinId}-${index}`);
+            
+            if (!historyData || historyData.length === 0) {
+                // Show error or empty state
+                loader.innerHTML = '<span class="text-[10px] text-gray-500">N/A</span>';
+                return; 
+            }
+            
+            loader.style.display = 'none';
+
+            const prices = historyData.map(p => p.price);
+            const times = historyData.map(p => p.time);
+            const isUp = prices[prices.length - 1] >= prices[0];
+            const color = isUp ? '#10b981' : '#ef4444';
+
+            // Destroy existing chart if exists
+            if (appState.charts[coinId]) {
+                appState.charts[coinId].destroy();
+            }
+
+            const ctx = canvas.getContext('2d');
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, isUp ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)');
+            gradient.addColorStop(1, 'rgba(0,0,0,0)');
+
+            appState.charts[coinId] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: times,
+                    datasets: [{
+                        data: prices,
+                        borderColor: color,
+                        borderWidth: 2,
+                        backgroundColor: gradient,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            enabled: false, // Using custom tooltip
+                            external: externalTooltipHandler,
+                            intersect: false,
+                            mode: 'index',
+                        }
+                    },
+                    scales: {
+                        x: { display: false },
+                        y: { display: false }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+        }
+
+        // Custom Tooltip Logic to match React version
+        const externalTooltipHandler = (context) => {
+            const {chart, tooltip} = context;
+            const tooltipEl = document.getElementById('chartjs-tooltip');
+
+            if (tooltip.opacity === 0) {
+                tooltipEl.style.opacity = 0;
+                return;
+            }
+
+            if (tooltip.body) {
+                const bodyLines = tooltip.body.map(b => b.lines);
+                const val = parseFloat(tooltip.dataPoints[0].raw);
+                tooltipEl.innerHTML = formatUSD(val);
+            }
+
+            const {offsetLeft: positionX, offsetTop: positionY} = chart.canvas;
+
+            tooltipEl.style.opacity = 1;
+            tooltipEl.style.left = positionX + tooltip.caretX + 'px';
+            tooltipEl.style.top = positionY + tooltip.caretY - 20 + 'px'; // Shift up slightly
+        };
+
+        async function handleCardClick(coinId) {
+            const index = appState.coins.indexOf(coinId);
+            const currentRange = appState.ranges[coinId];
+            const rangeIdx = RANGE_ORDER.indexOf(currentRange);
+            const nextRange = RANGE_ORDER[(rangeIdx + 1) % RANGE_ORDER.length];
+            
+            // Update State
+            appState.ranges[coinId] = nextRange;
+            
+            // Update UI (Show Loader, Update Footer)
+            renderRanges(coinId, index);
+            if(appState.charts[coinId]) appState.charts[coinId].destroy();
+            const loader = document.getElementById(`loader-${coinId}-${index}`);
+            loader.style.display = 'flex';
+            loader.innerHTML = '<div class="w-6 h-6 border-2 border-retro-primary border-t-transparent rounded-full animate-spin"></div>';
+
+            // Fetch New Data
+            try {
+                const history = await fetchHistory(coinId, nextRange);
+                renderChart(coinId, index, history);
+            } catch (e) {
+                // If it fails after all retries
+                console.error(e);
+                loader.innerHTML = '<span class="text-[10px] text-red-500">RETRYING...</span>';
+                // Final last-ditch retry after 5 seconds
+                setTimeout(async () => {
+                     try {
+                        const history = await fetchHistory(coinId, nextRange);
+                        renderChart(coinId, index, history);
+                     } catch(finalErr) {
+                        loader.innerHTML = '<span class="text-[10px] text-red-500">ERROR</span>';
+                     }
+                }, 5000);
+            }
+        }
+
+        /** INITIALIZATION **/
+        async function run() {
+            initGrid();
+
+            // 1. Fetch Basic Price Data (High Priority)
+            try {
+                const assets = await fetchAssets(appState.coins);
+                assets.forEach(asset => {
+                    appState.prices[asset.id] = asset;
+                    const idx = appState.coins.indexOf(asset.id);
+                    if(idx > -1) updateCardData(asset.id, idx, asset);
+                });
+            } catch (e) {
+                console.error("Critical error fetching assets", e);
+            }
+
+            // 2. Fetch Charts (Sequential Loading)
+            // Strict sequential loading to create a cascading effect and respect API limits
+            for (let i = 0; i < appState.coins.length; i++) {
+                const coinId = appState.coins[i];
+                
+                // Small delay between charts for visual effect and API breathing room
+                if (i > 0) await delay(800); 
+                
+                try {
+                    // This uses queuedFetch internally, but awaiting here ensures strict order
+                    const history = await fetchHistory(coinId, appState.ranges[coinId]);
+                    renderChart(coinId, i, history);
+                } catch (e) {
+                    console.warn(`Initial history load failed for ${coinId}`, e);
+                }
+            }
+
+            // 3. Polling for Price Updates
+            setInterval(async () => {
+                const updatedAssets = await fetchAssets(appState.coins);
+                updatedAssets.forEach(asset => {
+                    appState.prices[asset.id] = asset;
+                    const idx = appState.coins.indexOf(asset.id);
+                    if(idx > -1) updateCardData(asset.id, idx, asset);
+                });
+            }, 60000);
+        }
+
+        // Start
+        window.addEventListener('DOMContentLoaded', run);
+
+    </script>
+</body>
+</html>

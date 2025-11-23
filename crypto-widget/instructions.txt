@@ -1,0 +1,4 @@
+The app includes logic to handle different inputs:
+4 Specific Coins: ?coins=bitcoin,ethereum,cardano,ripple -> Shows exactly these 4.
+Less than 4: ?coins=dogecoin -> Shows Dogecoin in the first slot, then fills the remaining 3 slots with the default list (Bitcoin, Ethereum, etc) to ensure the grid is always full.
+More than 4: ?coins=a,b,c,d,e -> Takes the first 4 and ignores the rest.

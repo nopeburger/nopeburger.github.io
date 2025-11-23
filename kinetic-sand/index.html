@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zen Kinetic Sand</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        background-color: #0f0e0d; 
+        margin: 0;
+        overflow: hidden;
+        font-family: sans-serif;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "p5": "https://cdn.jsdelivr.net/npm/p5@1.11.0/+esm"
+        }
+      }
+    </script>
+    <script type="module" src="./index.js"></script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div class="min-h-screen w-full bg-[#0f0e0d] flex flex-col items-center justify-center overflow-hidden relative text-white">
+      
+      <!-- Ambient Background Texture -->
+      <div class="absolute inset-0 opacity-20 pointer-events-none bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-stone-800 via-black to-black"></div>
+      
+      <!-- Main Content Wrapper -->
+      <main class="relative z-10 scale-100 transition-transform duration-1000">
+        
+        <!-- Table Rim UI Wrapper -->
+        <!-- Padding increased from p-8 to p-[47px] (approx 15px extra) -->
+        <div class="relative p-[47px] rounded-full bg-[#3d2b1f] shadow-2xl ring-4 ring-[#5c4033] ring-offset-4 ring-offset-black flex items-center justify-center">
+          
+          <!-- Canvas Container -->
+          <div id="canvas-container" class="rounded-full overflow-hidden cursor-none relative z-10 flex items-center justify-center block"></div>
+          
+          <!-- Glass Overlay -->
+          <div class="absolute inset-0 rounded-full pointer-events-none opacity-20 bg-gradient-to-tr from-white via-transparent to-black z-20 mix-blend-overlay"></div>
+          
+          <!-- Inner Shadow Overlay -->
+          <div class="absolute inset-0 rounded-full pointer-events-none shadow-[inset_0_0_80px_rgba(0,0,0,0.6)] z-30"></div>
+          
+        </div>
+
+      </main>
+    </div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
