@@ -20,7 +20,7 @@ const createLissajousLabyrinth = () => {
   
   const drift = randomFloat(0.5, 2.0);
   
-  // DRAPSTICALLY REDUCED: 1-2 revs is enough because f1/f2 create the density
+  // DRAPSTICALLY REDUCED: 1-2.5 revs is enough because f1/f2 create the density
   const revs = randomFloat(1.0, 2.5); 
 
   return (t) => {
