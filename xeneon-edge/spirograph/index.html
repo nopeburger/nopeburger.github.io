@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neon Kinetic Art</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.0/lib/p5.min.js"></script>
+    <style>
+      body, html {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #000000;
+        width: 100%;
+        height: 100%;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="relative w-screen h-screen bg-black overflow-hidden flex items-center justify-center">
+      <!-- Canvas Container -->
+      <div id="canvas-container" class="w-full h-full"></div>
+      
+      <!-- UI Overlay -->
+      <div class="absolute bottom-6 right-6 text-white/20 text-xs font-sans tracking-widest pointer-events-none select-none">
+        GENERATIVE KINETIC
+      </div>
+    </div>
+
+    <script>
+      // --- MATH UTILS ---
+      const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
+      const randomFloat = (min, max) => Math.random() * (max - min) + min;
+      const coinFlip = () => Math.random() > 0.5;
+
+      // --- PATTERN GENERATORS ---
+
+      const createLissajousLabyrinth = () => {
+        const f1 = randomInt(7, 13); 
+        const f2 = f1 + (coinFlip() ? 2 : 4); 
+        const f3 = randomInt(2, 5); 
+        const phase1 = Math.random() * Math.PI * 2;
+        const phase2 = Math.random() * Math.PI * 2;
+        const drift = randomFloat(0.5, 2.0);
+        const revs = randomFloat(1.5, 3.0); 
+        return (t) => {
+          const angle = t * Math.PI * 2 * revs;
+          const amp = 0.85 + 0.15 * Math.sin(angle / f1 * f3);
+          const x = amp * Math.sin(angle * f1 + phase1 + t * drift);
+          const y = amp * Math.cos(angle * f2 + phase2);
+          return { x, y };
+        };
+      };
+
+      const createRationalRoseWeb = () => {
+        const n = randomInt(3, 11);
+        const d = randomInt(2, 7); 
+        const precession = randomFloat(0.1, 0.4) * (coinFlip() ? 1 : -1);
+        const revs = randomInt(4, 8);
+        return (t) => {
+           const theta = t * Math.PI * 2 * revs;
+           const k = n / d;
+           const r = Math.cos(k * theta + (theta * 0.01) + (t * Math.PI * precession));
+           const x = r * Math.cos(theta);
+           const y = r * Math.sin(theta);
+           return { x, y };
+        };
+      };
+
+      const createSpirograph = () => {
+        const isEpi = coinFlip(); 
+        const R = randomFloat(0.5, 0.8) + 0.00123; 
+        const r = randomFloat(0.12, 0.45) + 0.00456; 
+        const d = randomFloat(0.2, 0.9); 
+        const revs = randomInt(3, 6);
+        const globalRot = randomFloat(0.2, 1.0);
+        return (t) => {
+          const theta = t * Math.PI * 2 * revs;
+          let x, y;
+          if (isEpi) {
+              x = (R + r) * Math.cos(theta) - d * Math.cos(((R + r) / r) * theta);
+              y = (R + r) * Math.sin(theta) - d * Math.sin(((R + r) / r) * theta);
+          } else {
+              x = (R - r) * Math.cos(theta) + d * Math.cos(((R - r) / r) * theta);
+              y = (R - r) * Math.sin(theta) - d * Math.sin(((R - r) / r) * theta);
+          }
+          const rot = t * Math.PI * globalRot;
+          const xRot = x * Math.cos(rot) - y * Math.sin(rot);
+          const yRot = x * Math.sin(rot) + y * Math.cos(rot);
+          const maxExt = R + r + d;
+          return { x: xRot / maxExt, y: yRot / maxExt };
+        };
+      };
+
+      const createRotoSpiro = () => {
+        const R = randomFloat(0.4, 0.6);
+        const r = randomFloat(0.1, 0.3);
+        const d = randomFloat(0.3, 0.8);
+        const frameSpeed = randomFloat(1, 4) * (coinFlip() ? 1 : -1);
+        const drift = randomFloat(0.1, 0.5);
+        const revs = randomInt(3, 6);
+        return (t) => {
+          const theta = t * Math.PI * 2 * revs;
+          const frameTheta = t * Math.PI * 2 * (frameSpeed + t * drift * 0.1);
+          const xRaw = (R - r) * Math.cos(theta) + d * Math.cos(((R - r) / r) * theta);
+          const yRaw = (R - r) * Math.sin(theta) - d * Math.sin(((R - r) / r) * theta);
+          const x = xRaw * Math.cos(frameTheta) - yRaw * Math.sin(frameTheta);
+          const y = xRaw * Math.sin(frameTheta) + yRaw * Math.cos(frameTheta);
+          const maxR = R + r + d; 
+          return { x: x / maxR, y: y / maxR };
+        };
+      };
+
+      const createHarmonograph = () => {
+        const u = randomInt(2, 4);
+        const v = randomInt(2, 5);
+        const detune1 = randomFloat(0.002, 0.01);
+        const detune2 = randomFloat(0.002, 0.01);
+        const f1 = u + detune1;
+        const f3 = u + detune1; 
+        const f2 = v + detune2;
+        const f4 = v + detune2;
+        const p1 = 0;
+        const p3 = Math.PI / 2; 
+        const p2 = 0;
+        const p4 = (Math.floor(Math.random() * 4) * Math.PI / 2); 
+        const revs = randomInt(3, 8);
+        return (t) => {
+            const time = t * Math.PI * 2 * revs;
+            const x = Math.sin(time * f1 + p1) + Math.sin(time * f2 + p2);
+            const y = Math.sin(time * f3 + p3) + Math.sin(time * f4 + p4);
+            return { x: x / 2.1, y: y / 2.1 };
+        };
+      };
+
+      const createSpiralGalaxy = () => {
+        const arms = randomInt(3, 9);
+        const curvature = randomFloat(0.5, 1.5);
+        const revs = randomInt(3, 8);
+        const armPhase = Math.random() * Math.PI;
+        const galaxyDrift = randomFloat(0.2, 0.8);
+        return (t) => {
+          const theta = t * Math.PI * 2 * revs;
+          let rBase = Math.pow(t, 0.6); 
+          const modulation = 0.1 * Math.sin(arms * theta + armPhase);
+          const r = rBase + modulation;
+          const phi = theta * curvature + (t * Math.PI * galaxyDrift);
+          const x = r * Math.cos(phi);
+          const y = r * Math.sin(phi);
+          return { x: x / 1.15, y: y / 1.15 };
+        };
+      };
+
+      const createTorusKnot = () => {
+        const pVal = randomInt(2, 7);
+        const qVal = pVal + randomInt(1, 3);
+        const revs = randomInt(4, 8);
+        const drift = randomFloat(0.5, 1.5);
+        return (t) => {
+          const phi = t * Math.PI * 2 * revs;
+          const radius = 0.6 + 0.25 * Math.cos(qVal * phi + (t * drift));
+          const x = radius * Math.cos(pVal * phi);
+          const y = radius * Math.sin(pVal * phi);
+          return { x: x / 1.0, y: y / 1.0 };
+        };
+      };
+
+      const createSuperformula = () => {
+        const m = randomInt(3, 12);
+        const n1 = randomFloat(0.5, 3);
+        const n2 = randomFloat(0.5, 3);
+        const n3 = randomFloat(0.5, 3);
+        const revs = randomInt(3, 6);
+        const rotationSpeed = randomFloat(0.1, 0.3) * (coinFlip() ? 1 : -1);
+        return (t) => {
+          const phi = t * Math.PI * 2 * revs;
+          const term1 = Math.pow(Math.abs(Math.cos(m * phi / 4)), n2);
+          const term2 = Math.pow(Math.abs(Math.sin(m * phi / 4)), n3);
+          const r = Math.pow(term1 + term2, -1 / n1);
+          const rot = phi * 0.05 + (t * Math.PI * 2 * rotationSpeed);
+          const rScaled = r * 0.5; 
+          const x = rScaled * Math.cos(phi + rot);
+          const y = rScaled * Math.sin(phi + rot);
+          return { x, y };
+        };
+      };
+
+      const createInfinityCycle = () => {
+        const revs = randomInt(4, 8);
+        const rotationSpeed = randomFloat(0.02, 0.1);
+        return (t) => {
+          const theta = t * Math.PI * 2 * revs;
+          const denom = 1 + Math.sin(theta)*Math.sin(theta);
+          const r = 0.8; 
+          const xBase = (r * Math.cos(theta)) / denom;
+          const yBase = (r * Math.sin(theta) * Math.cos(theta)) / denom;
+          const rot = theta * 0.01 + (t * Math.PI * 4 * rotationSpeed);
+          const x = xBase * Math.cos(rot) - yBase * Math.sin(rot);
+          const y = xBase * Math.sin(rot) + yBase * Math.cos(rot);
+          return { x, y };
+        };
+      };
+
+      const createButterflyCurve = () => {
+        const revs = randomInt(4, 8);
+        const drift = randomFloat(0.2, 0.6);
+        return (t) => {
+          const theta = t * Math.PI * 2 * revs;
+          const term1 = Math.exp(Math.sin(theta));
+          const term2 = 2 * Math.cos(4 * theta);
+          const term3 = Math.pow(Math.sin((2 * theta - Math.PI) / 24), 5);
+          const rRaw = term1 - term2 + term3;
+          const r = rRaw * 0.18;
+          const rot = t * Math.PI * drift;
+          const x = r * Math.cos(theta + rot);
+          const y = r * Math.sin(theta + rot);
+          return { x, y };
+        };
+      };
+
+      const getRandomPattern = () => {
+        const generators = [
+          { name: 'Harmonograph', fn: createHarmonograph },
+          { name: 'Roto Spiro', fn: createRotoSpiro },
+          { name: 'Spirograph Mandala', fn: createSpirograph },
+          { name: 'Rational Rose', fn: createRationalRoseWeb },
+          { name: 'Lissajous Labyrinth', fn: createLissajousLabyrinth },
+          { name: 'Spiral Galaxy', fn: createSpiralGalaxy },
+          { name: 'Torus Knot', fn: createTorusKnot },
+          { name: 'Superformula Star', fn: createSuperformula },
+          { name: 'Infinity Cycle', fn: createInfinityCycle },
+          { name: 'Butterfly Curve', fn: createButterflyCurve }
+        ];
+        const choice = generators[Math.floor(Math.random() * generators.length)];
+        return {
+          name: choice.name,
+          generator: choice.fn()
+        };
+      };
+
+      // --- SKETCH LOGIC ---
+
+      const VisualState = {
+        DRAWING: 'DRAWING',
+        FADING: 'FADING'
+      };
+
+      const TARGET_DURATION_MS = 180 * 1000; // 3 Minutes per pattern
+      const FADE_DURATION_MS = 3000;         // Time to fade out screen at end of pattern
+      const COOL_DOWN_MS = 3000;             // Time for neon trail to turn white
+      const MAX_SPEED_PX_PER_SEC = 200;      // Increased speed for full screen
+
+      const sketch = (p) => {
+        let currentState = VisualState.DRAWING;
+        let currentProgress = 0; 
+        let fadeStartTime = 0;
+        let currentPattern = null;
+        let drawScale = 0;
+        let center = { x: 0, y: 0 };
+        let currentBallPos = { x: 0, y: 0 };
+        
+        let persistentLayer;
+        let activeTrail = [];
+        let lastCommittedPoint = null; 
+
+        p.setup = () => {
+          const canvas = p.createCanvas(window.innerWidth, window.innerHeight);
+          const container = document.getElementById('canvas-container');
+          if (container) {
+            canvas.parent(container);
+          }
+          canvas.style('display', 'block');
+          p.pixelDensity(window.devicePixelRatio > 1 ? 2 : 1);
+          
+          initGraphicsLayers();
+          p.colorMode(p.HSB, 360, 100, 100, 100);
+          
+          startNewPattern();
+        };
+
+        const initGraphicsLayers = () => {
+          drawScale = Math.min(p.width, p.height) * 0.45;
+          center = { x: p.width / 2, y: p.height / 2 };
+          
+          if (persistentLayer) persistentLayer.remove();
+          persistentLayer = p.createGraphics(p.width, p.height);
+          persistentLayer.colorMode(p.RGB);
+          persistentLayer.noFill();
+          persistentLayer.stroke(255);
+          persistentLayer.strokeWeight(2);
+          persistentLayer.strokeJoin(p.ROUND);
+          persistentLayer.strokeCap(p.ROUND);
+        };
+
+        const startNewPattern = () => {
+          currentPattern = getRandomPattern();
+          currentProgress = 0;
+          currentState = VisualState.DRAWING;
+          activeTrail = [];
+          lastCommittedPoint = null;
+          persistentLayer.clear();
+        };
+
+        p.mousePressed = () => {
+          startNewPattern();
+        };
+        
+        p.windowResized = () => {
+          p.resizeCanvas(window.innerWidth, window.innerHeight);
+          initGraphicsLayers();
+          startNewPattern();
+        };
+
+        p.draw = () => {
+          p.background(0); 
+          
+          const now = p.millis();
+          const dtMs = p.deltaTime || 16;
+          
+          const currentHue = (p.frameCount * 0.5) % 360; 
+
+          if (currentState === VisualState.DRAWING) {
+            if (currentProgress >= 1) {
+              currentState = VisualState.FADING;
+              fadeStartTime = now;
+            }
+            
+            if (currentPattern) {
+              let idealTInc = dtMs / TARGET_DURATION_MS;
+              
+              const tPeek = Math.min(currentProgress + 0.0001, 1);
+              const p1 = currentPattern.generator(currentProgress);
+              const p2 = currentPattern.generator(tPeek);
+              
+              const distNorm = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+              const projectedDistNorm = (distNorm * 10000) * idealTInc;
+              const projectedDistPx = projectedDistNorm * drawScale;
+              const projectedSpeed = (projectedDistPx / dtMs) * 1000; 
+
+              let actualTInc = idealTInc;
+              if (projectedSpeed > MAX_SPEED_PX_PER_SEC) {
+                  const scaleFactor = MAX_SPEED_PX_PER_SEC / projectedSpeed;
+                  actualTInc *= scaleFactor;
+              }
+              
+              const tPrev = currentProgress;
+              const tNext = Math.min(currentProgress + actualTInc, 1);
+              
+              const steps = 6; 
+              
+              for (let i = 1; i <= steps; i++) {
+                 const tSub = p.lerp(tPrev, tNext, i / steps);
+                 const rawPos = currentPattern.generator(tSub);
+                 
+                 const distSq = rawPos.x*rawPos.x + rawPos.y*rawPos.y;
+                 let finalX = rawPos.x;
+                 let finalY = rawPos.y;
+                 
+                 if (distSq > 1) {
+                   const dist = Math.sqrt(distSq);
+                   finalX = rawPos.x / dist;
+                   finalY = rawPos.y / dist;
+                 }
+
+                 const screenX = center.x + finalX * drawScale;
+                 const screenY = center.y + finalY * drawScale;
+                 
+                 activeTrail.push({
+                   x: screenX,
+                   y: screenY,
+                   time: now,
+                   hue: currentHue
+                 });
+                 
+                 if (i === steps) {
+                   currentBallPos = { x: screenX, y: screenY };
+                 }
+              }
+              currentProgress = tNext;
+            }
+          } else if (currentState === VisualState.FADING) {
+            if (now - fadeStartTime > FADE_DURATION_MS) {
+              startNewPattern();
+            }
+          }
+
+          let cutoffIndex = -1;
+          
+          persistentLayer.stroke(255, 255, 255); 
+          persistentLayer.strokeWeight(2);
+          
+          for (let i = 0; i < activeTrail.length; i++) {
+            const point = activeTrail[i];
+            const age = now - point.time;
+            
+            if (age > COOL_DOWN_MS) {
+              cutoffIndex = i;
+              if (lastCommittedPoint) {
+                  persistentLayer.line(lastCommittedPoint.x, lastCommittedPoint.y, point.x, point.y);
+              } else if (i > 0) {
+                   const prev = activeTrail[i-1];
+                   persistentLayer.line(prev.x, prev.y, point.x, point.y);
+              }
+              lastCommittedPoint = point;
+            } else {
+              break;
+            }
+          }
+          
+          if (cutoffIndex !== -1) {
+            activeTrail.splice(0, cutoffIndex + 1);
+          }
+          
+          if (currentState === VisualState.FADING) {
+             const alpha = p.map(now - fadeStartTime, 0, FADE_DURATION_MS, 255, 0);
+             p.tint(255, alpha);
+          } else {
+             p.noTint();
+          }
+          p.image(persistentLayer, 0, 0);
+          
+          p.noFill();
+          p.strokeWeight(3);
+          
+          if (activeTrail.length > 0) {
+            p.beginShape();
+            if (lastCommittedPoint) {
+              p.stroke(0, 0, 100); 
+              p.vertex(lastCommittedPoint.x, lastCommittedPoint.y);
+            }
+            p.endShape();
+            
+            let prev = lastCommittedPoint || activeTrail[0];
+            
+            for (let i = 0; i < activeTrail.length; i++) {
+              const pt = activeTrail[i];
+              const age = now - pt.time;
+              const tColor = p.constrain(age / COOL_DOWN_MS, 0, 1);
+              
+              const sat = p.lerp(90, 0, tColor);
+              const bri = 100;
+              
+              p.stroke(pt.hue, sat, bri);
+              p.line(prev.x, prev.y, pt.x, pt.y);
+              prev = pt;
+            }
+          }
+
+          if (currentState === VisualState.DRAWING) {
+            const flickerOsc = Math.sin(now * 0.02) * 15;
+            const flickerNoise = p.random(-5, 5);
+            const glowRadius = 90 + flickerOsc + flickerNoise; 
+
+            p.blendMode(p.ADD);
+            
+            const ctx = p.drawingContext;
+            const gx = currentBallPos.x;
+            const gy = currentBallPos.y;
+
+            const gradient = ctx.createRadialGradient(gx, gy, 0, gx, gy, glowRadius);
+            gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.06, 'rgba(255, 255, 255, 1)'); 
+            gradient.addColorStop(0.15, 'rgba(255, 255, 255, 0.5)'); 
+            gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.1)');
+            gradient.addColorStop(1.0, 'rgba(255, 255, 255, 0)');
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(gx, gy, glowRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            p.blendMode(p.BLEND);
+          }
+        };
+      };
+
+      new p5(sketch);
+    </script>
+  </body>
+</html>
