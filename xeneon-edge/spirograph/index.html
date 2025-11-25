@@ -24,7 +24,11 @@
     <div class="relative w-screen h-screen bg-black overflow-hidden flex items-center justify-center">
       <!-- Canvas Container -->
       <div id="canvas-container" class="w-full h-full"></div>
-
+      
+      <!-- UI Overlay -->
+      <div class="absolute bottom-6 right-6 text-white/20 text-xs font-sans tracking-widest pointer-events-none select-none">
+        GENERATIVE KINETIC
+      </div>
     </div>
 
     <script>
@@ -447,9 +451,10 @@
           }
 
           if (currentState === VisualState.DRAWING) {
-            const flickerOsc = Math.sin(now * 0.02) * 15;
-            const flickerNoise = p.random(-5, 5);
-            const glowRadius = 90 + flickerOsc + flickerNoise; 
+            // Slower, more organic flicker using Perlin noise
+            const slowBreath = Math.sin(now * 0.002) * 15;
+            const organicFlicker = (p.noise(now * 0.008) - 0.5) * 60;
+            const glowRadius = 130 + slowBreath + organicFlicker; 
 
             p.blendMode(p.ADD);
             
@@ -457,7 +462,7 @@
             const gx = currentBallPos.x;
             const gy = currentBallPos.y;
 
-            const gradient = ctx.createRadialGradient(gx, gy, 0, gx, gy, glowRadius);
+            const gradient = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(0, glowRadius));
             gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
             gradient.addColorStop(0.06, 'rgba(255, 255, 255, 1)'); 
             gradient.addColorStop(0.15, 'rgba(255, 255, 255, 0.5)'); 
@@ -466,7 +471,7 @@
 
             ctx.fillStyle = gradient;
             ctx.beginPath();
-            ctx.arc(gx, gy, glowRadius, 0, Math.PI * 2);
+            ctx.arc(gx, gy, Math.max(0, glowRadius), 0, Math.PI * 2);
             ctx.fill();
 
             p.blendMode(p.BLEND);
