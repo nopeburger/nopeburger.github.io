@@ -175,7 +175,14 @@
           const phi = t * Math.PI * 2 * revs;
           const term1 = Math.pow(Math.abs(Math.cos(m * phi / 4)), n2);
           const term2 = Math.pow(Math.abs(Math.sin(m * phi / 4)), n3);
-          const r = Math.pow(term1 + term2, -1 / n1);
+          
+          // Safety check to prevent Division by Zero or Infinity
+          const sum = term1 + term2;
+          if (sum === 0) return { x: 0, y: 0 };
+          
+          let r = Math.pow(sum, -1 / n1);
+          if (!isFinite(r)) r = 0;
+          
           const rot = phi * 0.05 + (t * Math.PI * 2 * rotationSpeed);
           const rScaled = r * 0.5; 
           const x = rScaled * Math.cos(phi + rot);
@@ -274,6 +281,10 @@
           initGraphicsLayers();
           p.colorMode(p.HSB, 360, 100, 100, 100);
           
+          // Ensure smooth line joints
+          p.strokeCap(p.ROUND);
+          p.strokeJoin(p.ROUND);
+          
           startNewPattern();
         };
 
@@ -286,7 +297,7 @@
           persistentLayer.colorMode(p.RGB);
           persistentLayer.noFill();
           persistentLayer.stroke(255);
-          persistentLayer.strokeWeight(2);
+          persistentLayer.strokeWeight(2); // Persistent line width
           persistentLayer.strokeJoin(p.ROUND);
           persistentLayer.strokeCap(p.ROUND);
         };
@@ -297,7 +308,7 @@
           currentState = VisualState.DRAWING;
           activeTrail = [];
           lastCommittedPoint = null;
-          persistentLayer.clear();
+          if (persistentLayer) persistentLayer.clear();
         };
 
         p.mousePressed = () => {
@@ -314,7 +325,8 @@
           p.background(0); 
           
           const now = p.millis();
-          const dtMs = p.deltaTime || 16;
+          let dtMs = p.deltaTime || 16;
+          if (dtMs <= 0) dtMs = 16; // Safety check
           
           const currentHue = (p.frameCount * 0.5) % 360; 
 
@@ -355,11 +367,15 @@
                  let finalX = rawPos.x;
                  let finalY = rawPos.y;
                  
+                 // Normalize if exceeds unit circle (prevents artifacts)
                  if (distSq > 1) {
                    const dist = Math.sqrt(distSq);
                    finalX = rawPos.x / dist;
                    finalY = rawPos.y / dist;
                  }
+                 
+                 // Safety check for NaN or Infinity to prevent script errors
+                 if (!isFinite(finalX) || !isFinite(finalY)) continue;
 
                  const screenX = center.x + finalX * drawScale;
                  const screenY = center.y + finalY * drawScale;
@@ -385,6 +401,7 @@
 
           let cutoffIndex = -1;
           
+          // --- PERSISTENT LAYER MANAGEMENT ---
           persistentLayer.stroke(255, 255, 255); 
           persistentLayer.strokeWeight(2);
           
@@ -402,6 +419,7 @@
               }
               lastCommittedPoint = point;
             } else {
+              // Points are ordered by time, so we can break early
               break;
             }
           }
@@ -410,6 +428,9 @@
             activeTrail.splice(0, cutoffIndex + 1);
           }
           
+          // --- RENDER ---
+          
+          // Draw persistent layer first
           if (currentState === VisualState.FADING) {
              const alpha = p.map(now - fadeStartTime, 0, FADE_DURATION_MS, 255, 0);
              p.tint(255, alpha);
@@ -418,18 +439,14 @@
           }
           p.image(persistentLayer, 0, 0);
           
+          // Draw active trail
           p.noFill();
-          p.strokeWeight(3);
           
           if (activeTrail.length > 0) {
-            p.beginShape();
-            if (lastCommittedPoint) {
-              p.stroke(0, 0, 100); 
-              p.vertex(lastCommittedPoint.x, lastCommittedPoint.y);
-            }
-            p.endShape();
-            
             let prev = lastCommittedPoint || activeTrail[0];
+            
+            p.strokeCap(p.ROUND);
+            p.strokeJoin(p.ROUND);
             
             for (let i = 0; i < activeTrail.length; i++) {
               const pt = activeTrail[i];
@@ -438,15 +455,22 @@
               
               const sat = p.lerp(90, 0, tColor);
               const bri = 100;
+
+              // Interpolate weight: 4px (hot) -> 2px (cold)
+              const w = p.lerp(4, 2, tColor);
               
-              p.stroke(pt.hue, sat, bri);
+              // No alpha fade here. We transition opaque white trail
+              // directly into the opaque white persistent layer to avoid dark gaps.
+
+              p.strokeWeight(w);
+              p.stroke(pt.hue, sat, bri, 100);
               p.line(prev.x, prev.y, pt.x, pt.y);
               prev = pt;
             }
           }
 
+          // Draw Glowing Ball
           if (currentState === VisualState.DRAWING) {
-            // Slower, more organic flicker using Perlin noise
             const slowBreath = Math.sin(now * 0.002) * 15;
             const organicFlicker = (p.noise(now * 0.008) - 0.5) * 60;
             const glowRadius = 130 + slowBreath + organicFlicker; 
@@ -456,18 +480,21 @@
             const ctx = p.drawingContext;
             const gx = currentBallPos.x;
             const gy = currentBallPos.y;
+            
+            // Validate coordinates before creating gradient to prevent errors
+            if (isFinite(gx) && isFinite(gy)) {
+                const gradient = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(0.1, glowRadius));
+                gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
+                gradient.addColorStop(0.06, 'rgba(255, 255, 255, 1)'); 
+                gradient.addColorStop(0.15, 'rgba(255, 255, 255, 0.5)'); 
+                gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.1)');
+                gradient.addColorStop(1.0, 'rgba(255, 255, 255, 0)');
 
-            const gradient = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(0, glowRadius));
-            gradient.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
-            gradient.addColorStop(0.06, 'rgba(255, 255, 255, 1)'); 
-            gradient.addColorStop(0.15, 'rgba(255, 255, 255, 0.5)'); 
-            gradient.addColorStop(0.4, 'rgba(255, 255, 255, 0.1)');
-            gradient.addColorStop(1.0, 'rgba(255, 255, 255, 0)');
-
-            ctx.fillStyle = gradient;
-            ctx.beginPath();
-            ctx.arc(gx, gy, Math.max(0, glowRadius), 0, Math.PI * 2);
-            ctx.fill();
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(gx, gy, Math.max(0, glowRadius), 0, Math.PI * 2);
+                ctx.fill();
+            }
 
             p.blendMode(p.BLEND);
           }
