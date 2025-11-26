@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>8-Bit Asteroids</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+    canvas { display: block; touch-action: none; image-rendering: pixelated; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+</head>
+<body>
+<script>
+// ================== CONFIG ==================
+const COLOR_SCHEMES = {
+  green:  [57, 255, 20],   // Terminal Green
+  amber:  [255, 176, 0],   // Classic Amber
+  cyan:   [0, 255, 255],   // Tron Blue
+  red:    [255, 50, 50],   // Virtual Boy Red
+  purple: [190, 50, 255]   // Vaporwave Purple
+};
+
+// Parse URL parameter ?color=... safely
+let activeColor = COLOR_SCHEMES.green;
+try {
+  if (typeof window !== 'undefined' && window.location && window.location.search) {
+    const params = new URLSearchParams(window.location.search);
+    const schemeKey = (params.get('color') || 'green').toLowerCase();
+    if (COLOR_SCHEMES[schemeKey]) {
+      activeColor = COLOR_SCHEMES[schemeKey];
+    }
+  }
+} catch(e) {
+  console.warn("Error parsing URL params, using default.", e);
+}
+
+// Ensure activeColor is valid
+if (!Array.isArray(activeColor) || activeColor.length < 3) {
+    activeColor = COLOR_SCHEMES.green;
+}
+
+const PALETTE = { neon: activeColor };
+const NUM_SHAPES   = 40;    // Target Asteroid count
+const NOISE_STEP   = 0.0006;// Field evolution speed
+const FORCE_SCALE  = 0.1;   // Curl force strength
+const SPIN_MIN     = -0.03;
+const SPIN_MAX     =  0.03;
+const BOUNDS_PAD   = 40;
+// ============================================
+
+let shapes = [];
+let particles = [];
+let noiseT = 0;
+let overlay;
+let ditherPatterns = []; 
+
+function setup(){
+  createCanvas(windowWidth, windowHeight);
+  pixelDensity(1); 
+  strokeJoin(MITER); 
+  strokeCap(SQUARE);
+  
+  createDitherPatterns();
+  buildOverlay();
+
+  // Initial Spawn
+  for(let i=0;i<NUM_SHAPES;i++){
+    spawnAsteroid(true);
+  }
+}
+
+function spawnAsteroid(instant = false) {
+  // Use p5 variables only after setup
+  const w = width || window.innerWidth;
+  const h = height || window.innerHeight;
+
+  const pos = createVector(random(BOUNDS_PAD, w-BOUNDS_PAD),
+                           random(BOUNDS_PAD, h-BOUNDS_PAD));
+  
+  // Safe random vector generation
+  // createVector(1,0) is safe, rotate() returns the vector
+  const vel = createVector(1, 0).rotate(random(TWO_PI)).mult(random(0.1, 0.5));
+  
+  const ast = new Asteroid(
+    pos,
+    vel,
+    random(30, 60), // Base Size
+    random(SPIN_MIN, SPIN_MAX)
+  );
+  if(!instant) ast.scale = 0; // Pop-in effect for respawning
+  shapes.push(ast);
+}
+
+function createDitherPatterns() {
+  ditherPatterns = [];
+  
+  // Safety check for p5 context
+  if (typeof drawingContext === 'undefined') return;
+
+  const cOn = color(PALETTE.neon[0], PALETTE.neon[1], PALETTE.neon[2]);
+  
+  const make = (fn) => {
+    try {
+      const pg = createGraphics(8, 8);
+      pg.pixelDensity(1);
+      pg.background(0);
+      pg.noStroke();
+      pg.fill(cOn);
+      fn(pg);
+      // Fallback for pg.canvas (supports older p5/browsers)
+      const patternSource = pg.canvas || pg.elt;
+      if (patternSource) {
+        return drawingContext.createPattern(patternSource, 'repeat');
+      }
+    } catch (e) {
+      console.warn("Failed to create pattern", e);
+    }
+    return null;
+  };
+
+  // Level 0: Black
+  ditherPatterns.push(make(pg => {}));
+  // Level 1: Sparse
+  ditherPatterns.push(make(pg => { pg.rect(2, 2, 2, 2); pg.rect(6, 6, 2, 2); }));
+  // Level 2: Checker
+  ditherPatterns.push(make(pg => { pg.rect(0, 0, 4, 4); pg.rect(4, 4, 4, 4); }));
+  // Level 3: Highlight
+  ditherPatterns.push(make(pg => { pg.background(cOn); pg.fill(0); pg.rect(3, 3, 2, 2); }));
+}
+
+// --- Classes ---
+
+class Asteroid {
+  constructor(pos, vel, size, angVel){
+    this.pos = pos.copy(); 
+    this.vel = vel.copy();
+    this.baseSize = size; 
+    this.scale = 1;
+    this.ang = random(TWO_PI); 
+    this.angVel = angVel;
+    this.drag = 0.99;
+    
+    // Generate jagged geometry
+    this.verts = [];
+    const numPoints = floor(random(5, 9));
+    for(let i=0; i<numPoints; i++){
+      const theta = map(i, 0, numPoints, 0, TWO_PI);
+      // Add randomness to radius for "rock" look
+      const r = this.baseSize * random(0.5, 1.4); 
+      this.verts.push(createVector(cos(theta)*r, sin(theta)*r));
+    }
+  }
+
+  separate(others) {
+    for (let other of others) {
+      if (other === this) continue;
+      const d = this.pos.dist(other.pos);
+      const minDist = (this.baseSize + other.baseSize) * 0.8;
+      if (d < minDist && d > 0) {
+        // Safe vector subtraction using instance method
+        let repel = createVector(this.pos.x, this.pos.y).sub(other.pos).normalize();
+        repel.mult((minDist - d) * 0.05); 
+        this.vel.add(repel);
+      }
+    }
+  }
+
+  update(){
+    // Respawn pop-in animation
+    if(this.scale < 1) this.scale = min(this.scale + 0.05, 1);
+
+    // Physics
+    const f = curlNoise2D(this.pos.x*0.003, this.pos.y*0.003, noiseT).mult(FORCE_SCALE);
+    this.vel.add(f).mult(this.drag); 
+    this.pos.add(this.vel); 
+    this.ang += this.angVel;
+    
+    // Bounds
+    const pad = this.baseSize;
+    if(this.pos.x < pad) { this.pos.x = pad; this.vel.x *= -1; }
+    if(this.pos.x > width-pad) { this.pos.x = width-pad; this.vel.x *= -1; }
+    if(this.pos.y < pad) { this.pos.y = pad; this.vel.y *= -1; }
+    if(this.pos.y > height-pad) { this.pos.y = height-pad; this.vel.y *= -1; }
+  }
+  
+  draw(){
+    const ctx = drawingContext;
+    if (!ctx) return;
+    
+    push();
+    translate(this.pos.x, this.pos.y);
+    rotate(this.ang);
+    scale(this.scale);
+
+    stroke(PALETTE.neon[0], PALETTE.neon[1], PALETTE.neon[2]);
+    strokeWeight(2);
+
+    // Draw "Facets" - connect center to each edge vertex
+    const num = this.verts.length;
+    for(let i=0; i<num; i++){
+      const v1 = this.verts[i];
+      const v2 = this.verts[(i+1)%num];
+
+      // Lighting simulation
+      // Midpoint of edge relative to center
+      const mx = (v1.x + v2.x) / 2;
+      const my = (v1.y + v2.y) / 2;
+      // Angle of this facet
+      const midAngle = atan2(my, mx);
+      
+      // Adjust for global rotation to find angle vs light
+      const globalAngle = midAngle + this.ang;
+      // Light source from top-left
+      const lightAngle = -PI/4; 
+      
+      // Brightness based on alignment
+      const brightness = cos(globalAngle - lightAngle);
+      
+      let shadeIdx = floor(map(brightness, -1, 1, 0, 4));
+      shadeIdx = constrain(shadeIdx, 0, 3);
+
+      // Use native context for pattern fill
+      const pattern = ditherPatterns[shadeIdx];
+      if (pattern) {
+        ctx.fillStyle = pattern;
+      } else {
+        // Fallback if pattern generation failed
+        ctx.fillStyle = `rgb(${PALETTE.neon[0]},${PALETTE.neon[1]},${PALETTE.neon[2]})`;
+      }
+      
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(v1.x, v1.y);
+      ctx.lineTo(v2.x, v2.y);
+      ctx.closePath();
+      ctx.fill();
+      // Redraw strokes to ensure crispness on top of fill
+      ctx.stroke();
+    }
+
+    // Bold Outline for the asteroid shape
+    noFill();
+    strokeWeight(3);
+    beginShape();
+    for(let v of this.verts) vertex(v.x, v.y);
+    endShape(CLOSE);
+
+    pop();
+  }
+
+  contains(x, y) {
+    return dist(x, y, this.pos.x, this.pos.y) < (this.baseSize * this.scale);
+  }
+}
+
+class Particle {
+  constructor(x, y){
+    this.pos = createVector(x, y);
+    const a = random(TWO_PI);
+    const s = random(2, 6);
+    this.vel = createVector(cos(a)*s, sin(a)*s);
+    this.life = 1.0;
+    this.decay = random(0.04, 0.08);
+    this.size = random(4, 10);
+  }
+
+  update(){
+    this.pos.add(this.vel);
+    this.life -= this.decay;
+  }
+
+  draw(){
+    if(this.life <= 0) return;
+    
+    push(); // Isolate transform state
+    noStroke();
+    
+    // Flash effect
+    if(this.life > 0.7) fill(255); // White flash
+    else fill(PALETTE.neon[0], PALETTE.neon[1], PALETTE.neon[2], this.life * 255);
+    
+    rectMode(CENTER);
+    rect(this.pos.x, this.pos.y, this.size, this.size);
+    pop(); // Restore state
+  }
+}
+
+// --- Main Loop ---
+
+function draw(){
+  background(0);
+  noiseT += NOISE_STEP;
+
+  // Handle Interaction (Mouse drag + Touch drag)
+  handleInput();
+
+  // Respawn Logic (faster spawn if many are missing)
+  let spawnRate = shapes.length < NUM_SHAPES * 0.5 ? 10 : 30;
+  if(shapes.length < NUM_SHAPES && frameCount % spawnRate === 0) {
+    spawnAsteroid();
+  }
+
+  // Update & Draw Shapes
+  for(let i = shapes.length - 1; i >= 0; i--){
+    let s = shapes[i];
+    s.separate(shapes);
+    s.update(); 
+    s.draw(); 
+  }
+
+  // Update & Draw Particles
+  for(let i = particles.length - 1; i >= 0; i--){
+    let p = particles[i];
+    p.update();
+    p.draw();
+    if(p.life <= 0) particles.splice(i, 1);
+  }
+
+  drawOverlay();
+}
+
+// --- Interaction ---
+
+function handleInput() {
+  // Mouse Interaction
+  if(mouseIsPressed) {
+    checkExplosion(mouseX, mouseY);
+  }
+  
+  // Touch Interaction
+  if (typeof touches !== 'undefined') {
+    for (let t of touches) {
+      checkExplosion(t.x, t.y);
+    }
+  }
+}
+
+function mousePressed() {
+  return false; // Prevent default
+}
+
+function touchStarted() {
+  return false; // Prevent default
+}
+
+function touchMoved() {
+  return false; // Prevent default
+}
+
+function checkExplosion(x, y) {
+  // Iterate backwards to safely splice
+  for (let i = shapes.length - 1; i >= 0; i--) {
+    let s = shapes[i];
+    if (s && s.contains(x, y)) {
+      triggerExplosion(s);
+      shapes.splice(i, 1);
+      // Break ensures we only explode one asteroid per pointer per frame
+      break; 
+    }
+  }
+}
+
+function triggerExplosion(asteroid) {
+  const count = 16; // Debris count
+  for(let i=0; i<count; i++){
+    particles.push(new Particle(asteroid.pos.x, asteroid.pos.y));
+  }
+}
+
+// --- Utilities ---
+
+function curlNoise2D(x,y,t){
+  const e=0.001;
+  const dx=noise(x+e,y,t)-noise(x-e,y,t);
+  const dy=noise(x,y+e,t)-noise(x,y-e,t);
+  const v=createVector(-dy,dx);
+  if(v.mag()>0) v.normalize();
+  return v;
+}
+
+function buildOverlay(){
+  overlay=createGraphics(width,height); 
+  overlay.pixelDensity(1); 
+  overlay.clear();
+  
+  // Use current palette for scanlines
+  overlay.stroke(PALETTE.neon[0], PALETTE.neon[1], PALETTE.neon[2], 30); 
+  overlay.strokeWeight(1);
+  for(let y=0;y<height;y+=4) overlay.line(0,y,width,y);
+  
+  const ctx=overlay.drawingContext;
+  const grad=ctx.createRadialGradient(width/2,height/2, min(width,height)*0.2, width/2,height/2, max(width,height)*0.75);
+  grad.addColorStop(0,'rgba(0,0,0,0)'); 
+  
+  // Create a darker version of the main color for the vignette
+  const r = floor(PALETTE.neon[0] * 0.2);
+  const g = floor(PALETTE.neon[1] * 0.2);
+  const b = floor(PALETTE.neon[2] * 0.2);
+  
+  grad.addColorStop(1, `rgba(${r},${g},${b},0.6)`); 
+  
+  ctx.save(); ctx.fillStyle=grad; ctx.fillRect(0,0,width,height); ctx.restore();
+}
+
+function drawOverlay(){
+  if (!overlay) return; 
+  const flick = 0.98 + 0.02 * noise(frameCount*0.1);
+  push(); 
+  tint(255,255*flick); 
+  image(overlay,0,0,width,height); 
+  pop();
+  
+  push(); 
+  noFill(); 
+  stroke(PALETTE.neon[0], PALETTE.neon[1], PALETTE.neon[2], 150); 
+  strokeWeight(4);
+  rectMode(CORNER); 
+  rect(2, 2, width - 4, height - 4); 
+  pop();
+}
+
+function windowResized(){ 
+  // Ensure we are in a valid state
+  if (typeof resizeCanvas !== 'function') return;
+  resizeCanvas(windowWidth,windowHeight); 
+  createDitherPatterns(); 
+  buildOverlay(); 
+}
+
+</script>
+</body>
+</html>
