@@ -56,3 +56,22 @@ A collection of widgets that run in the iframe widget module in Corsair iCUE.
 ```bash
 <iframe src="https://nopeburger.github.io/xeneon-edge/spirograph/"></iframe>
 ```
+## 🪨 Asteroid Blaster
+![Screen Recording 2025-11-26 110700](https://github.com/user-attachments/assets/1e449c8f-bf3c-44a7-8035-896659102341)
+
+- Low poly asteroids bouncing around
+- Tap or drag your finger to blow them up
+- 5 color scheme options
+  
+▶️ Default Usage (Green)
+```bash
+<iframe src="https://nopeburger.github.io/xeneon-edge/asteroids/"></iframe>
+```
+
+▶️ Custom Usage
+- Add variable ?color=amber
+- Options: amber, purple, cyan, red
+
+```bash
+<iframe src="https://nopeburger.github.io/xeneon-edge/asteroids/?color=amber"></iframe>
+```
