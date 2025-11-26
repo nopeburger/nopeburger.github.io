@@ -45,6 +45,17 @@ A collection of widgets that run in the iframe widget module in Corsair iCUE.
 ```bash
 <iframe src="https://nopeburger.github.io/xeneon-edge/kaleido-fractal/"></iframe>
 ```
+## ✨ Cosmic Entity
+![Screen Recording 2025-11-26 120949_1](https://github.com/user-attachments/assets/197edd0d-605e-47b8-bc9d-3f813cbee8c4)
+
+- Randomly evolving fractal loop
+- Tapping on the widget will temporarily modify camera position and fractal shape
+- Try not to stare directly into it's eye!
+
+▶️ Usage
+```bash
+<iframe src="https://nopeburger.github.io/xeneon-edge/cosmic-entity/"></iframe>
+```
 
 ## 🌀 Spirograph
 ![Screen Recording 2025-11-26 105108](https://github.com/user-attachments/assets/a7ceb962-e045-4891-8ae1-bfeae94d3785)
