@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Flowing Fractal by Nopeburger</title>
+  <title>Flow Fractal by Nopeburger</title>
   <style>
     html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
     canvas { display: block; touch-action: none; }
@@ -75,8 +75,21 @@ const fragSource = `
     // Normalize coordinates based on canvas resolution
     vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / min(u_resolution.x, u_resolution.y);
     
-    // Apply zoom and pan
+    // Apply zoom and pan first
     vec2 z = (uv * u_scale) + u_offset;
+
+    // --- GEOMETRIC INVERSION ---
+    // Invert the coordinate system to turn the shape inside out.
+    // The "Outside" (Infinity) maps to the Center (0,0).
+    // The "Inside" (Zero) maps to the Edge (Infinity).
+    float r2 = dot(z, z);
+    // Prevent division by zero with a small epsilon
+    if (r2 > 0.00001) {
+        z = z / r2;
+    } else {
+        z = vec2(0.0); // Handle singularity
+    }
+    
     vec2 c = u_seed;
     
     float escape = 0.0;
@@ -111,39 +124,48 @@ const fragSource = `
       }
     }
     
+    // --- CALCULATE GEOMETRY LINES (ORBIT TRAP) ---
+    // Calculated for BOTH Interior and Exterior to ensure visual interest everywhere.
+    // Invert distance: closer to axis = brighter
+    float geomLine = 1.0 / (1.0 + trap * 15.0);
+    geomLine = pow(geomLine, 2.5); // Sharpen
+    
+    // White geometry lines
+    vec3 geomColor = vec3(1.0) * geomLine * 0.5;
+
+    // --- COLOR MIXING ---
+    // Colors shift based on spatial position and time
+    // We compute a rough "smoothIter" approximation for the interior to keep colors moving
+    float iterForColor = (dotZ > 4.0) ? escape : 50.0; 
+    float colorMix = 0.5 + 0.5 * sin(iterForColor * 0.2 + length(z) * 0.4 + u_time * 0.5);
+    vec3 baseColor = mix(u_colorA, u_colorB, colorMix);
+    
     vec3 finalColor = vec3(0.0);
     
     if(dotZ > 4.0) {
+      // --- EXTERIOR RENDERING ---
+      // Due to inversion, this usually appears in the Center of the screen (the inverted Infinity)
+      
       // Smooth iteration count
       float smoothIter = escape - log2(log2(dotZ)) + 4.0;
       
-      // --- GEOMETRY LINES ---
-      float freq = 2.0;
-      float phase = u_time * 0.5;
+      // Dynamic frequency adds "breathing" texture variation
+      // Higher density for more intricate details
+      float freq = 6.0 + sin(u_time * 0.2) * 3.0; 
+      float phase = u_time * 0.4;
       
       // Primary contour pattern (Sine wave)
       float val = sin(smoothIter * freq - phase);
-      
-      // --- SMOOTHING & GLOW LOGIC ---
       
       // 1. Core Line: 
       float core = smoothstep(0.5, 0.98, val); 
       
       // 2. Radiating Glow:
       float glowSignal = smoothstep(-0.2, 1.0, val);
-      float glow = pow(glowSignal, 4.0) * 0.8; 
+      float glow = pow(glowSignal, 3.0) * 1.0; 
       
-      // 3. Orbit Trap "Sacred Geometry" Lines
-      // Invert distance: closer to axis = brighter
-      float geomLine = 1.0 / (1.0 + trap * 20.0);
-      geomLine = pow(geomLine, 3.0); // Sharpen the lines
-      
-      float intensity = core + glow + geomLine;
+      float intensity = core + glow;
 
-      // --- COLOR MIXING ---
-      float colorMix = 0.5 + 0.5 * sin(smoothIter * 0.15 + u_time * 0.2);
-      vec3 baseColor = mix(u_colorA, u_colorB, colorMix);
-      
       vec3 bgColor = baseColor * 0.02;
       
       // The main structure
@@ -153,20 +175,26 @@ const fragSource = `
       float hotCore = smoothstep(0.95, 1.0, val);
       geometryColor += vec3(1.0) * hotCore * 0.6;
       
-      // Add white to the geometry lines specifically
-      geometryColor += vec3(1.0) * geomLine * 0.5;
+      // Add Sacred Geometry Lines
+      geometryColor += geomColor;
 
       // --- EDGE SMOOTHING ---
       // Smooth out the sharp mask effect at the fractal boundary
-      // We fade from the geometry color to the interior color as iterations approach MAX_ITER
+      // We fade from the exterior geometry color to the INTERIOR look
       float edgeFade = 1.0 - smoothstep(MAX_ITER - 15.0, MAX_ITER, smoothIter);
       
-      // Mix with interior color (dark background)
-      finalColor = mix(u_colorA * 0.01, geometryColor, edgeFade);
+      // The interior look is the base color + geometry lines
+      vec3 interiorLook = (baseColor * 0.02) + geomColor;
+      
+      finalColor = mix(interiorLook, geometryColor, edgeFade);
 
     } else {
-      // Interior (The Set itself)
-      finalColor = u_colorA * 0.01; 
+      // --- INTERIOR RENDERING ---
+      // Due to inversion, this usually appears at the Edges of the screen (the inverted Zero)
+      // Render the Orbit Trap lines.
+      
+      vec3 interiorBg = baseColor * 0.02; 
+      finalColor = interiorBg + geomColor;
     }
     
     gl_FragColor = vec4(finalColor, 1.0);
@@ -176,20 +204,21 @@ const fragSource = `
 // --- STATE VARIABLES ---
 let fractalShader;
 
-const INITIAL_BASE = { x: -0.8, y: 0.156 };
+// Mutable initial base to support random start
+let initialBase = { x: -0.8, y: 0.156 };
 
 // Seed (Shape)
 let currentBase = { x: -0.8, y: 0.156 };
 let targetBase = { x: -0.8, y: 0.156 };
 
 // Camera (Scale & Offset)
-// Start fixed to target the bottom left corner with 200% zoom (Scale 1.0)
-let currentScale = 1.0; 
-let currentOffset = { x: -1.9, y: -1.3 };
+// Start centered (0,0) with enough zoom out (Scale 2.0) to see the shape
+let currentScale = 2.0; 
+let currentOffset = { x: 0.0, y: 0.0 };
 
 // Target variables
-let targetScale = 1.0;
-let targetOffset = { x: -1.9, y: -1.3 };
+let targetScale = 2.0;
+let targetOffset = { x: 0.0, y: 0.0 };
 
 // Color State
 let hue = 0; // 0 to 1 cycle
@@ -209,15 +238,23 @@ function setup() {
   } catch(e) {
     console.error("Shader creation failed:", e);
   }
+
+  // Randomize initial base shape so every session is unique
+  let dx = random(-0.6, 0.6);
+  let dy = random(-0.6, 0.6);
   
-  // Set initial state explicitly
-  currentBase = { ...INITIAL_BASE };
-  targetBase = { ...INITIAL_BASE };
+  // Constrain to known interesting regions of Burning Ship
+  initialBase.x = constrain(initialBase.x + dx, -1.75, -0.4);
+  initialBase.y = constrain(initialBase.y + dy, -0.8, 0.8);
   
-  // FORCE Start at Bottom Left
-  currentScale = 1.0;
-  currentOffset = { x: -1.9, y: -1.3 };
-  targetOffset = { x: -1.9, y: -1.3 };
+  // Set initial state to the new randomized base
+  currentBase = { ...initialBase };
+  targetBase = { ...initialBase };
+  
+  // FORCE Start Centered
+  currentScale = 2.0;
+  currentOffset = { x: 0.0, y: 0.0 };
+  targetOffset = { x: 0.0, y: 0.0 };
   
   lastInteractionTime = millis();
 }
@@ -245,6 +282,7 @@ function randomizeTarget() {
   let dy = random(-0.6, 0.6);
   
   // Allow a wider range of Burning Ship shapes
+  // Slightly tightened max X to avoid the purely chaotic dispersion region
   targetBase.x = constrain(targetBase.x + dx, -1.8, -0.2);
   targetBase.y = constrain(targetBase.y + dy, -0.8, 0.8);
   
@@ -260,8 +298,8 @@ function randomizeTarget() {
   let effectiveScale = currentScale * zoomFactor;
 
   // Replicate Camera Drift
-  let driftX = map(noise(t * 0.05 + 200.0), 0, 1, -0.4, 0.4);
-  let driftY = map(noise(t * 0.05 + 300.0), 0, 1, -0.4, 0.4);
+  let driftX = map(noise(t * 0.1 + 200.0), 0, 1, -0.6, 0.6);
+  let driftY = map(noise(t * 0.1 + 300.0), 0, 1, -0.6, 0.6);
   let effectiveOffsetX = currentOffset.x + driftX;
   let effectiveOffsetY = currentOffset.y + driftY;
 
@@ -296,8 +334,8 @@ function draw() {
   // --- IDLE RESET LOGIC ---
   // If no interaction for a set time, gently drift the shape target back to initial
   if (millis() - lastInteractionTime > IDLE_DELAY) {
-    targetBase.x = lerp(targetBase.x, INITIAL_BASE.x, 0.02);
-    targetBase.y = lerp(targetBase.y, INITIAL_BASE.y, 0.02);
+    targetBase.x = lerp(targetBase.x, initialBase.x, 0.02);
+    targetBase.y = lerp(targetBase.y, initialBase.y, 0.02);
   }
   
   // --- PHYSICS / INTERPOLATION ---
@@ -315,16 +353,17 @@ function draw() {
   
   // 1. Shape Evolution (Fractals Inside)
   // Use Perlin noise to create a continuous, wandering path for the seed around its base.
-  let seedNoiseX = map(noise(t * 0.15), 0, 1, -0.15, 0.15);
-  let seedNoiseY = map(noise(t * 0.15 + 100.0), 0, 1, -0.15, 0.15);
+  // Increased speed (0.25) and amplitude (+/- 0.4) for drastic morphing.
+  let seedNoiseX = map(noise(t * 0.25), 0, 1, -0.4, 0.4);
+  let seedNoiseY = map(noise(t * 0.25 + 100.0), 0, 1, -0.4, 0.4);
   
   let finalSeedX = currentBase.x + seedNoiseX;
   let finalSeedY = currentBase.y + seedNoiseY;
 
   // 2. Camera Drift (Exploration)
-  // Wander significantly around the target position while idle
-  let driftX = map(noise(t * 0.05 + 200.0), 0, 1, -0.4, 0.4);
-  let driftY = map(noise(t * 0.05 + 300.0), 0, 1, -0.4, 0.4);
+  // Wider range for more exploration (+/- 0.6) and faster drift (0.1)
+  let driftX = map(noise(t * 0.1 + 200.0), 0, 1, -0.6, 0.6);
+  let driftY = map(noise(t * 0.1 + 300.0), 0, 1, -0.6, 0.6);
   
   let finalOffsetX = currentOffset.x + driftX;
   let finalOffsetY = currentOffset.y + driftY;
